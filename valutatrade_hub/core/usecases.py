@@ -5,11 +5,17 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-USERS_FILE = os.path.join(DATA_DIR, "users.json")
-PORTFOLIOS_FILE = os.path.join(DATA_DIR, "portfolios.json")
-RATES_FILE = os.path.join(DATA_DIR, "rates.json")
+from valutatrade_hub.core.currencies import CurrencyNotFoundError, get_currency
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    InsufficientFundsError,
+)
+from valutatrade_hub.decorators import log_action
+from valutatrade_hub.infra.settings import settings
+
+USERS_FILE = settings.get_users_file()
+PORTFOLIOS_FILE = settings.get_portfolios_file()
+RATES_FILE = settings.get_rates_file()
 
 
 def _load_json(filepath: str, default: Any = None) -> Any:
@@ -41,6 +47,7 @@ def _hash_password(password: str, salt: str) -> str:
     return hashlib.sha256((password + salt).encode()).hexdigest()
 
 
+@log_action(action="REGISTER", verbose=True, log_exceptions=True)
 def register_user(username: str, password: str) -> Dict[str, Any]:
     """Регистрирует нового пользователя."""
     if len(password) < 4:
@@ -83,6 +90,7 @@ def register_user(username: str, password: str) -> Dict[str, Any]:
     }
 
 
+@log_action(action="LOGIN", verbose=False, log_exceptions=True)
 def login_user(username: str, password: str) -> Dict[str, Any]:
     """Вход пользователя в систему."""
     users = _load_json(USERS_FILE, [])
@@ -148,10 +156,16 @@ def get_user_portfolio(user_id: int, base_currency: str = "USD") -> Dict[str, An
     return {"user_id": user_id, "base_currency": base_currency, "wallets": wallets_info}
 
 
-def buy_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
+@log_action(action="BUY", verbose=True, log_exceptions=True)
+def buy_currency(user_id: int, currency_code: str, amount: float) -> Dict[str, Any]:
     """Покупка валюты."""
     if amount <= 0:
         raise ValueError("'amount' должен быть положительным числом")
+
+    try:
+        get_currency(currency_code)
+    except CurrencyNotFoundError:
+        raise CurrencyNotFoundError(currency_code)
 
     portfolios = _load_json(PORTFOLIOS_FILE, [])
 
@@ -169,17 +183,17 @@ def buy_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
         portfolio_idx = len(portfolios) - 1
 
     wallets = portfolio_data.get("wallets", {})
-    old_balance = wallets.get(currency, {}).get("balance", 0.0)
+    old_balance = wallets.get(currency_code, {}).get("balance", 0.0)
     new_balance = old_balance + amount
 
-    wallets[currency] = {"balance": new_balance}
+    wallets[currency_code] = {"balance": new_balance}
     portfolio_data["wallets"] = wallets
     portfolios[portfolio_idx] = portfolio_data
     _save_json(PORTFOLIOS_FILE, portfolios)
 
     rates_data = _load_json(RATES_FILE, {})
     base_currency = "USD"
-    rate_key = f"{currency}_{base_currency}"
+    rate_key = f"{currency_code}_{base_currency}"
     rate = None
     estimated_cost = None
 
@@ -188,7 +202,8 @@ def buy_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
         estimated_cost = amount * rate
 
     return {
-        "currency": currency,
+        "user_id": user_id,
+        "currency": currency_code,
         "amount": amount,
         "old_balance": old_balance,
         "new_balance": new_balance,
@@ -198,10 +213,16 @@ def buy_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
     }
 
 
-def sell_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
+@log_action(action="SELL", verbose=True, log_exceptions=True)
+def sell_currency(user_id: int, currency_code: str, amount: float) -> Dict[str, Any]:
     """Продажа валюты."""
     if amount <= 0:
         raise ValueError("'amount' должен быть положительным числом")
+
+    try:
+        get_currency(currency_code)
+    except CurrencyNotFoundError:
+        raise CurrencyNotFoundError(currency_code)
 
     portfolios = _load_json(PORTFOLIOS_FILE, [])
 
@@ -214,26 +235,26 @@ def sell_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
             break
 
     if portfolio_idx == -1:
-        raise ValueError(f"У вас нет кошелька '{currency}'")
+        raise ValueError(f"У вас нет кошелька '{currency_code}'")
 
     wallets = portfolio_data.get("wallets", {})
 
-    if currency not in wallets:
-        raise ValueError(f"У вас нет кошелька '{currency}'")
+    if currency_code not in wallets:
+        raise ValueError(f"У вас нет кошелька '{currency_code}'")
 
-    old_balance = wallets[currency].get("balance", 0.0)
+    old_balance = wallets[currency_code].get("balance", 0.0)
 
     if amount > old_balance:
-        raise ValueError(
-            f"Недостаточно средств: доступно {old_balance:.4f} {currency}, требуется {amount:.4f}"# noqa: E501
+        raise InsufficientFundsError(
+            available=old_balance, required=amount, code=currency_code
         )
 
     new_balance = old_balance - amount
 
     if new_balance > 0:
-        wallets[currency] = {"balance": new_balance}
+        wallets[currency_code] = {"balance": new_balance}
     else:
-        del wallets[currency]
+        del wallets[currency_code]
 
     portfolio_data["wallets"] = wallets
     portfolios[portfolio_idx] = portfolio_data
@@ -241,7 +262,7 @@ def sell_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
 
     rates_data = _load_json(RATES_FILE, {})
     base_currency = "USD"
-    rate_key = f"{currency}_{base_currency}"
+    rate_key = f"{currency_code}_{base_currency}"
     rate = None
     estimated_revenue = None
 
@@ -250,7 +271,8 @@ def sell_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
         estimated_revenue = amount * rate
 
     return {
-        "currency": currency,
+        "user_id": user_id,
+        "currency": currency_code,
         "amount": amount,
         "old_balance": old_balance,
         "new_balance": new_balance,
@@ -260,20 +282,29 @@ def sell_currency(user_id: int, currency: str, amount: float) -> Dict[str, Any]:
     }
 
 
-def get_exchange_rate(from_currency: str, to_currency: str) -> Dict[str, Any]:
+def get_exchange_rate(from_code: str, to_code: str) -> Dict[str, Any]:
     """Получает курс обмена валют."""
+    try:
+        get_currency(from_code)
+        get_currency(to_code)
+    except CurrencyNotFoundError as e:
+        raise CurrencyNotFoundError(
+            str(e).replace("Валюта с кодом", "Неизвестная валюта")
+        )
+
     rates_data = _load_json(RATES_FILE, {})
 
-    rate_key = f"{from_currency}_{to_currency}"
+    rate_key = f"{from_code}_{to_code}"
 
     if rate_key in rates_data:
         rate_info = rates_data[rate_key]
         updated_at = datetime.fromisoformat(rate_info["updated_at"])
 
-        if datetime.now() - updated_at < timedelta(minutes=5):
+        ttl_seconds = settings.get_rates_ttl()
+        if datetime.now() - updated_at < timedelta(seconds=ttl_seconds):
             return {
-                "from": from_currency,
-                "to": to_currency,
+                "from": from_code,
+                "to": to_code,
                 "rate": rate_info["rate"],
                 "updated_at": rate_info["updated_at"],
                 "source": "cache",
@@ -299,17 +330,11 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Dict[str, Any]:
         _save_json(RATES_FILE, rates_data)
 
         return {
-            "from": from_currency,
-            "to": to_currency,
+            "from": from_code,
+            "to": to_code,
             "rate": rate_info["rate"],
             "updated_at": rate_info["updated_at"],
             "source": "stub",
         }
 
-    return {
-        "from": from_currency,
-        "to": to_currency,
-        "rate": None,
-        "updated_at": datetime.now().isoformat(),
-        "source": None,
-    }
+    raise ApiRequestError(f"Курс {from_code}→{to_code} недоступен")
