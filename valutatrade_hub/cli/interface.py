@@ -3,6 +3,11 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.usecases import (
     buy_currency,
     get_exchange_rate,
@@ -11,6 +16,7 @@ from valutatrade_hub.core.usecases import (
     register_user,
     sell_currency,
 )
+from valutatrade_hub.infra.settings import settings
 
 
 class CLIInterface:
@@ -132,7 +138,7 @@ class CLIInterface:
         try:
             user = register_user(username, password)
             print(
-                f"Пользователь '{username}' зарегистрирован (id={user['user_id']}). Войдите: login --username {username} --password ****"# noqa: E501
+                f"Пользователь '{username}' зарегистрирован (id={user['user_id']}). Войдите: login --username {username} --password ****"  # noqa: E501
             )
         except ValueError as e:
             print(f"{e}")
@@ -152,7 +158,8 @@ class CLIInterface:
         """Обрабатывает команду show-portfolio."""
         if not self._check_login():
             sys.exit(1)
-
+        if not base_currency:
+            base_currency = settings.get_default_base_currency()
         try:
             portfolio_info = get_user_portfolio(
                 self.current_user["user_id"], base_currency
@@ -163,7 +170,7 @@ class CLIInterface:
                 return
 
             print(
-                f"Портфель пользователя '{self.current_user['username']}' (база: {base_currency}):"# noqa: E501
+                f"Портфель пользователя '{self.current_user['username']}' (база: {base_currency}):"  # noqa: E501
             )
 
             total_value = 0.0
@@ -171,7 +178,7 @@ class CLIInterface:
                 if info["value_in_base"] is not None:
                     total_value += info["value_in_base"]
                     print(
-                        f"- {currency}: {info['balance']:.4f}  →  {info['value_in_base']:.2f} {base_currency}"# noqa: E501
+                        f"- {currency}: {info['balance']:.4f}  →  {info['value_in_base']:.2f} {base_currency}"  # noqa: E501
                     )
                 else:
                     print(f"- {currency}: {info['balance']:.4f}  →  курс недоступен")
@@ -201,15 +208,15 @@ class CLIInterface:
             result = buy_currency(self.current_user["user_id"], currency, amount)
 
             print(
-                f"Покупка выполнена: {amount:.4f} {currency} по курсу {result['rate']:.2f} {result['base_currency']}/{currency}"# noqa: E501
+                f"Покупка выполнена: {amount:.4f} {currency} по курсу {result['rate']:.2f} {result['base_currency']}/{currency}"  # noqa: E501
             )
             print("Изменения в портфеле:")
             print(
-                f"- {currency}: было {result['old_balance']:.4f} → стало {result['new_balance']:.4f}"# noqa: E501
+                f"- {currency}: было {result['old_balance']:.4f} → стало {result['new_balance']:.4f}"  # noqa: E501
             )
             if result["estimated_cost"] is not None:
                 print(
-                    f"Оценочная стоимость покупки: {result['estimated_cost']:,.2f} {result['base_currency']}"# noqa: E501
+                    f"Оценочная стоимость покупки: {result['estimated_cost']:,.2f} {result['base_currency']}"  # noqa: E501
                 )
 
         except ValueError as e:
@@ -237,24 +244,25 @@ class CLIInterface:
             result = sell_currency(self.current_user["user_id"], currency, amount)
 
             print(
-                f"Продажа выполнена: {amount:.4f} {currency} по курсу {result['rate']:.2f} {result['base_currency']}/{currency}"# noqa: E501
+                f"Продажа выполнена: {amount:.4f} {currency} по курсу {result['rate']:.2f} {result['base_currency']}/{currency}" #noqa: E501
             )
             print("Изменения в портфеле:")
             print(
-                f"- {currency}: было {result['old_balance']:.4f} → стало {result['new_balance']:.4f}"# noqa: E501
+                f"- {currency}: было {result['old_balance']:.4f} → стало {result['new_balance']:.4f}" #noqa: E501
             )
             if result["estimated_revenue"] is not None:
                 print(
-                    f"Оценочная выручка: {result['estimated_revenue']:,.2f} {result['base_currency']}"# noqa: E501
+                    f"Оценочная выручка: {result['estimated_revenue']:,.2f} {result['base_currency']}" #noqa: E501
                 )
 
+        except InsufficientFundsError as e:
+            print(str(e))
+            sys.exit(1)
         except ValueError as e:
             error_msg = str(e)
-            if "Недостаточно средств" in error_msg:
-                print(error_msg)
-            elif "У вас нет кошелька" in error_msg:
+            if "У вас нет кошелька" in error_msg:
                 print(
-                    f"{error_msg}. Добавьте валюту: она создаётся автоматически при первой покупке."# noqa: E501
+                    f"{error_msg}. Добавьте валюту: она создаётся автоматически при первой покупке." #noqa: E501
                 )
             else:
                 print(f"Ошибка продажи: {e}")
@@ -279,7 +287,7 @@ class CLIInterface:
 
             if rate_info["rate"] is None:
                 print(
-                    f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже."# noqa: E501
+                    f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже." #noqa: E501
                 )
                 sys.exit(1)
 
@@ -287,15 +295,32 @@ class CLIInterface:
                 "%Y-%m-%d %H:%M:%S"
             )
             print(
-                f"Курс {from_currency}→{to_currency}: {rate_info['rate']:.8f} (обновлено: {updated_at})"# noqa: E501
+                f"Курс {from_currency}→{to_currency}: {rate_info['rate']:.8f} (обновлено: {updated_at})" #noqa: E501
             )
 
+            # Показать обратный курс
             if rate_info["rate"] != 0:
                 reverse_rate = 1 / rate_info["rate"]
                 print(
                     f"Обратный курс {to_currency}→{from_currency}: {reverse_rate:.8f}"
                 )
 
+        except CurrencyNotFoundError as e:
+            print(str(e))
+            print(
+                "\nДоступные валюты: USD, EUR, BTC, ETH, LTC, XRP, RUB, GBP, JPY, CNY"
+            )
+            print("Используйте команду: get-rate --from USD --to EUR")
+            sys.exit(1)
+        except ApiRequestError as e:
+            print(str(e))
+            print("\nРекомендации:")
+            print("1. Проверьте подключение к интернету")
+            print("2. Повторите попытку позже")
+            print(
+                "3. Используйте локальный кэш командой: get-rate --from USD --to EUR --force-cache" #noqa: E501
+            )
+            sys.exit(1)
         except Exception as e:
             print(f"Ошибка получения курса: {e}")
             sys.exit(1)

@@ -2,6 +2,8 @@ import hashlib
 from datetime import datetime
 from typing import Dict, Optional
 
+from valutatrade_hub.core.exceptions import InsufficientFundsError
+
 
 class User:
     """Класс пользователя системы."""
@@ -205,6 +207,7 @@ class Wallet:
 
         Raises:
             ValueError: Если сумма некорректна
+            InsufficientFundsError: Если недостаточно средств
         """
         if not isinstance(amount, (int, float)):
             raise ValueError("Сумма должна быть числом")
@@ -214,10 +217,9 @@ class Wallet:
         amount_float = float(amount)
 
         if amount_float > self.balance:
-            print(
-                f"Недостаточно средств. Баланс: {self.balance:.2f} {self.currency_code}"
+            raise InsufficientFundsError(
+                available=self.balance, required=amount_float, code=self.currency_code
             )
-            return False
 
         self.balance -= amount_float
         print(f"Успешно снято {amount_float:.2f} {self.currency_code}")
