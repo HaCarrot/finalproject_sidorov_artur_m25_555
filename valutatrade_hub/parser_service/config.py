@@ -1,37 +1,30 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Final
 
 
 @dataclass
 class ParserConfig:
-    """Конфигурация для Parser Service."""
-    
-    # API ключи (загружаются из переменных окружения)
-    EXCHANGERATE_API_KEY: str = os.getenv("EXCHANGERATE_API_KEY", "5304e79baeaf0f789351bde7")
-    
-    # Эндпоинты
-    COINGECKO_URL: str = "https://api.coingecko.com/api/v3/simple/price"
-    EXCHANGERATE_API_URL: str = "https://v6.exchangerate-api.com/v6"
-    
-    # Списки валют
-    BASE_CURRENCY: str = "USD"
-    FIAT_CURRENCIES: tuple = ("EUR", "GBP", "RUB", "JPY", "CNY")
-    CRYPTO_CURRENCIES: tuple = ("BTC", "ETH", "SOL", "LTC", "XRP")
-    
-    # Сопоставление кодов криптовалют с ID для CoinGecko
-    CRYPTO_ID_MAP: dict = {
+    """Конфигурация API и параметров парсинга."""
+
+    # --- API ключи и эндпоинты ---
+    EXCHANGERATE_API_KEY: str = os.getenv("EXCHANGERATE_API_KEY", "")
+    COINGECKO_URL: Final[str] = "https://api.coingecko.com/api/v3/simple/price"
+    EXCHANGERATE_API_URL: Final[str] = "https://v6.exchangerate-api.com/v6"
+
+    # --- Валюты ---
+    BASE_CURRENCY: Final[str] = "USD"
+    FIAT_CURRENCIES: tuple[str, ...] = ("EUR", "GBP", "RUB")
+    CRYPTO_CURRENCIES: tuple[str, ...] = ("BTC", "ETH", "SOL")
+    CRYPTO_ID_MAP: dict[str, str] = field(default_factory=lambda: {
         "BTC": "bitcoin",
-        "ETH": "ethereum", 
+        "ETH": "ethereum",
         "SOL": "solana",
-        "LTC": "litecoin",
-        "XRP": "ripple"
-    }
-    
-    # Пути к файлам
-    RATES_FILE_PATH: str = "data/rates.json"
-    HISTORY_FILE_PATH: str = "data/exchange_rates.json"
-    
-    # Сетевые параметры
-    REQUEST_TIMEOUT: int = 10
-    RETRY_ATTEMPTS: int = 3
-    RETRY_DELAY: int = 1
+    })
+
+    # --- Пути ---
+    RATES_FILE_PATH: Final[str] = "data/rates.json"
+    HISTORY_FILE_PATH: Final[str] = "data/exchange_rates.json"
+
+    # --- Сетевые параметры ---
+    REQUEST_TIMEOUT: Final[int] = 10
