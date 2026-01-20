@@ -1,141 +1,45 @@
-import logging
-import traceback
-from datetime import datetime
-from functools import wraps
-from typing import Any, Callable, Dict
+import datetime
+import functools
 
-logger = logging.getLogger("domain.actions")
+from valutatrade_hub.logging_config import setup_logger
+
+logger = setup_logger()
 
 
-def log_action(
-    action: str, verbose: bool = False, log_exceptions: bool = True
-) -> Callable:
+def log_action(action_name: str, verbose: bool = False):
     """
-    Декоратор для логирования доменных операций.
-
-    Args:
-        action: Название действия (BUY/SELL/REGISTER/LOGIN и т.д.)
-        verbose: Добавлять подробный контекст в логи
-        log_exceptions: Логировать исключения
+    Декоратор для логирования операций (BUY, SELL, REGISTER, LOGIN).
+    Не подавляет исключения — только фиксирует их.
     """
-
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            log_context: Dict[str, Any] = {
-                "action": action,
-                "timestamp": datetime.now().isoformat(),
-                "result": "OK",
-            }
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+            username = kwargs.get("username") or getattr(args[0], "username", "N/A")
+            currency = kwargs.get("currency", "N/A")
+            amount = kwargs.get("amount", "N/A")
+            rate = kwargs.get("rate", "N/A")
+            base = kwargs.get("base", "USD")
 
             try:
                 result = func(*args, **kwargs)
-
-                if isinstance(result, dict):
-                    for field in [
-                        "user_id",
-                        "username",
-                        "currency",
-                        "amount",
-                        "rate",
-                        "base_currency",
-                    ]:
-                        if field in result:
-                            log_context[field] = result[field]
-
-                    if verbose:
-                        for field in [
-                            "old_balance",
-                            "new_balance",
-                            "estimated_cost",
-                            "estimated_revenue",
-                        ]:
-                            if field in result:
-                                log_context[field] = result[field]
-
-                logger.info(_format_log_message(log_context))
-
+                msg = (
+                    f"{action_name.upper()} user='{username}' currency='{currency}' "
+                    f"amount={amount} rate={rate} base='{base}' result=OK"
+                )
+                if verbose:
+                    msg += f" context={kwargs}"
+                logger.info(f"{timestamp} {msg}")
                 return result
 
             except Exception as e:
-                if log_exceptions:
-                    log_context["result"] = "ERROR"
-                    log_context["error_type"] = type(e).__name__
-                    log_context["error_message"] = str(e)
-
-                    _extract_args_to_context(args, kwargs, log_context)
-
-                    logger.error(_format_log_message(log_context))
-                    logger.debug(f"Traceback for {action}: {traceback.format_exc()}")
-
-                raise
+                msg = (
+                    f"{action_name.upper()} user='{username}' currency='{currency}' "
+                    f"amount={amount} rate={rate} base='{base}' "
+                    f"result=ERROR error_type='{type(e).__name__}' error_message='{e}'"
+                )
+                logger.error(f"{timestamp} {msg}")
+                raise  # пробрасываем исключение дальше
 
         return wrapper
-
     return decorator
-
-
-def _format_log_message(context: Dict[str, Any]) -> str:
-    """
-    Форматирует сообщение лога в строку.
-
-    Args:
-        context: Контекст для логирования
-
-    Returns:
-        Отформатированная строка лога
-    """
-    parts = [f"action={context.get('action', 'UNKNOWN')}"]
-
-    for field in ["user_id", "username", "currency", "amount", "rate", "base_currency"]:
-        if field in context:
-            parts.append(f"{field}={context[field]}")
-
-    parts.append(f"result={context.get('result', 'UNKNOWN')}")
-
-    if context.get("result") == "ERROR":
-        error_info = []
-        if "error_type" in context:
-            error_info.append(context["error_type"])
-        if "error_message" in context:
-            error_info.append(context["error_message"])
-        if error_info:
-            parts.append(f"error={' '.join(error_info)}")
-
-    return " ".join(parts)
-
-
-def _extract_args_to_context(
-    args: tuple, kwargs: dict, context: Dict[str, Any]
-) -> None:
-    """
-    Извлекает информацию из аргументов функции в контекст лога.
-
-    Args:
-        args: Позиционные аргументы
-        kwargs: Именованные аргументы
-        context: Контекст для обновления
-    """
-    for arg in args:
-        if isinstance(arg, int) and "user_id" not in context:
-            context["user_id"] = arg
-            break
-
-    for arg in args:
-        if (
-            isinstance(arg, str)
-            and arg.isupper()
-            and len(arg) <= 5
-            and "currency" not in context
-        ):
-            context["currency"] = arg
-            break
-
-    for arg in args:
-        if isinstance(arg, (int, float)) and "amount" not in context:
-            context["amount"] = arg
-            break
-
-    for key in ["user_id", "username", "currency", "amount", "rate", "base_currency"]:
-        if key in kwargs and key not in context:
-            context[key] = kwargs[key]

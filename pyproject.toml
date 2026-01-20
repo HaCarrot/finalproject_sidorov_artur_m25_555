@@ -11,7 +11,7 @@ python = ">=3.12"
 prettytable = "^3.17.0"
 
 [tool.poetry.scripts]
-valutatrade = "main:main"
+project = "main:main"
 
 [tool.ruff]
 line-length = 88

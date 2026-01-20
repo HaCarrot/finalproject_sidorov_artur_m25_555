@@ -1,326 +1,222 @@
 import hashlib
+import os
 from datetime import datetime
-from typing import Dict, Optional
 
 from valutatrade_hub.core.exceptions import InsufficientFundsError
 
 
 class User:
-    """Класс пользователя системы."""
+    """
+    Класс, описывающий пользователя системы ValutaTrade Hub.
+    """
 
     def __init__(
         self,
         user_id: int,
         username: str,
-        hashed_password: str,
-        salt: str,
-        registration_date: datetime,
-    ):
-        """
-        Инициализация пользователя.
-
-        Args:
-            user_id: Уникальный идентификатор пользователя
-            username: Имя пользователя
-            hashed_password: Хешированный пароль
-            salt: Соль для хеширования
-            registration_date: Дата регистрации
-        """
+        password: str,
+        registration_date: datetime | None = None,
+    ) -> None:
+        # Приватные атрибуты
         self._user_id = user_id
-        self._username = username
-        self._hashed_password = hashed_password
-        self._salt = salt
-        self._registration_date = registration_date
+        self._username = None
+        self._hashed_password = None
+        self._salt = os.urandom(8).hex()  # генерируем соль
+        self._registration_date = registration_date or datetime.now()
 
+        # Устанавливаем через сеттеры
+        self.username = username
+        self.password = password
+
+    # ----------------------------
+    # Геттеры и сеттеры
+    # ----------------------------
     @property
-    def user_id(self) -> int:
-        """Геттер для ID пользователя."""
+    def user_id(self):
         return self._user_id
 
-    @user_id.setter
-    def user_id(self, value: int) -> None:
-        """Сеттер для ID пользователя."""
-        if not isinstance(value, int) or value <= 0:
-            raise ValueError("ID пользователя должен быть положительным целым числом")
-        self._user_id = value
-
     @property
-    def username(self) -> str:
-        """Геттер для имени пользователя."""
+    def username(self):
         return self._username
 
     @username.setter
-    def username(self, value: str) -> None:
-        """Сеттер для имени пользователя."""
-        if not value or not isinstance(value, str):
-            raise ValueError("Имя пользователя не может быть пустым")
-        if len(value.strip()) == 0:
-            raise ValueError("Имя пользователя не может содержать только пробелы")
+    def username(self, value: str):
+        if not value.strip():
+            raise ValueError("Имя пользователя не может быть пустым.")
         self._username = value.strip()
 
     @property
-    def hashed_password(self) -> str:
-        """Геттер для хешированного пароля."""
+    def password(self):
         return self._hashed_password
 
-    @hashed_password.setter
-    def hashed_password(self, value: str) -> None:
-        """Сеттер для хешированного пароля."""
-        if not value or not isinstance(value, str):
-            raise ValueError("Пароль не может быть пустым")
-        if len(value) < 4:
+    @password.setter
+    def password(self, plain_password: str):
+        if len(plain_password) < 4:
             raise ValueError("Пароль должен быть не короче 4 символов.")
-        self._hashed_password = value
+        # Хешируем пароль с солью
+        self._hashed_password = self._hash_password(plain_password)
 
-    @property
-    def salt(self) -> str:
-        """Геттер для соли."""
-        return self._salt
-
-    @salt.setter
-    def salt(self, value: str) -> None:
-        """Сеттер для соли."""
-        if not value or not isinstance(value, str):
-            raise ValueError("Соль не может быть пустой")
-        self._salt = value
-
-    @property
-    def registration_date(self) -> datetime:
-        """Геттер для даты регистрации."""
-        return self._registration_date
-
-    @registration_date.setter
-    def registration_date(self, value: datetime) -> None:
-        """Сеттер для даты регистрации."""
-        if not isinstance(value, datetime):
-            raise ValueError("Дата регистрации должна быть объектом datetime")
-        self._registration_date = value
-
-    def get_user_info(self) -> dict:
+    # ----------------------------
+    # Вспомогательные методы
+    # ----------------------------
+    def _hash_password(self, password: str) -> str:
         """
-        Возвращает информацию о пользователе (без пароля и соли).
-
-        Returns:
-            Словарь с информацией о пользователе
+        Возвращает SHA256-хэш пароля с солью.
         """
-        return {
-            "user_id": self.user_id,
-            "username": self.username,
-            "registration_date": self.registration_date.isoformat(),
-        }
-
-    def change_password(self, new_password: str) -> None:
-        """
-        Изменяет пароль пользователя с хешированием.
-
-        Args:
-            new_password: Новый пароль
-        """
-
-        hashed = hashlib.sha256((new_password + self.salt).encode()).hexdigest()
-        self.hashed_password = hashed
+        return hashlib.sha256((password + self._salt).encode()).hexdigest()
 
     def verify_password(self, password: str) -> bool:
         """
-        Проверяет введённый пароль на совпадение.
-
-        Args:
-            password: Пароль для проверки
-
-        Returns:
-            True если пароль верный, иначе False
+        Проверяет введённый пароль.
         """
+        hashed_input = hashlib.sha256(
+            (password + self._salt).encode()
+        ).hexdigest()
+        return self._hashed_password == hashed_input
 
-        hashed_input = hashlib.sha256((password + self.salt).encode()).hexdigest()
-        return hashed_input == self.hashed_password
-
-
-class Wallet:
-    """Класс кошелька пользователя для конкретной валюты."""
-
-    def __init__(self, currency_code: str, balance: float = 0.0):
+    def change_password(self, new_password: str):
         """
-        Инициализация кошелька.
-
-        Args:
-            currency_code: Код валюты (например, "USD", "BTC")
-            balance: Начальный баланс (по умолчанию 0.0)
+        Меняет пароль с пересозданием соли.
         """
-        self.currency_code = currency_code
-        self._balance = balance
+        if len(new_password) < 4:
+            raise ValueError("Новый пароль должен быть не короче 4 символов.")
+        self._salt = os.urandom(8).hex()
+        self._hashed_password = self._hash_password(new_password)
 
-    @property
-    def currency_code(self) -> str:
-        """Геттер для кода валюты."""
-        return self._currency_code
-
-    @currency_code.setter
-    def currency_code(self, value: str) -> None:
-        """Сеттер для кода валюты."""
-        if not value or not isinstance(value, str):
-            raise ValueError("Код валюты не может быть пустым")
-        if len(value.strip()) == 0:
-            raise ValueError("Код валюты не может содержать только пробелы")
-        self._currency_code = value.strip().upper()
-
-    @property
-    def balance(self) -> float:
-        """Геттер для баланса."""
-        return self._balance
-
-    @balance.setter
-    def balance(self, value: float) -> None:
-        """Сеттер для баланса."""
-        if not isinstance(value, (int, float)):
-            raise ValueError("Баланс должен быть числом")
-        if value < 0:
-            raise ValueError("Баланс не может быть отрицательным")
-        self._balance = float(value)
-
-    def deposit(self, amount: float) -> None:
+    def get_user_info(self) -> dict:
         """
-        Пополнение баланса.
-
-        Args:
-            amount: Сумма для пополнения
-
-        Raises:
-            ValueError: Если сумма некорректна
+        Возвращает словарь с публичной информацией о пользователе.
         """
-        if not isinstance(amount, (int, float)):
-            raise ValueError("Сумма должна быть числом")
-        if amount <= 0:
-            raise ValueError("Сумма пополнения должна быть положительной")
-
-        self.balance += float(amount)
-        print(f"Успешно пополнено {amount:.2f} {self.currency_code}")
-
-    def withdraw(self, amount: float) -> bool:
-        """
-        Снятие средств с кошелька.
-
-        Args:
-            amount: Сумма для снятия
-
-        Returns:
-            True если снятие успешно, False если недостаточно средств
-
-        Raises:
-            ValueError: Если сумма некорректна
-            InsufficientFundsError: Если недостаточно средств
-        """
-        if not isinstance(amount, (int, float)):
-            raise ValueError("Сумма должна быть числом")
-        if amount <= 0:
-            raise ValueError("Сумма снятия должна быть положительной")
-
-        amount_float = float(amount)
-
-        if amount_float > self.balance:
-            raise InsufficientFundsError(
-                available=self.balance, required=amount_float, code=self.currency_code
-            )
-
-        self.balance -= amount_float
-        print(f"Успешно снято {amount_float:.2f} {self.currency_code}")
-        return True
-
-    def get_balance_info(self) -> str:
-        """
-        Возвращает информацию о текущем балансе.
-
-        Returns:
-            Строка с информацией о балансе
-        """
-        return f"Баланс {self.currency_code}: {self.balance:.2f}"
-
-
-class Portfolio:
-    """Класс портфеля для управления кошельками пользователя."""
-
-    def __init__(self, user_id: int, wallets: Optional[Dict[str, Wallet]] = None):
-        """
-        Инициализация портфеля.
-
-        Args:
-            user_id: Уникальный идентификатор пользователя
-            wallets: Словарь кошельков (ключ - код валюты, значение - Wallet)
-        """
-        self._user_id = user_id
-        self._wallets = wallets if wallets is not None else {}
-
-    @property
-    def user_id(self) -> int:
-        """Геттер для ID пользователя."""
-        return self._user_id
-
-    @property
-    def wallets(self) -> Dict[str, Wallet]:
-        """Геттер для словаря кошельков (возвращает копию)."""
-        return self._wallets.copy()
-
-    def add_currency(self, currency_code: str) -> None:
-        """
-        Добавляет новый кошелёк в портфель.
-
-        Args:
-            currency_code: Код валюты
-
-        Raises:
-            ValueError: Если валюта уже существует в портфеле
-        """
-        if currency_code in self._wallets:
-            raise ValueError(f"Валюта {currency_code} уже существует в портфеле")
-
-        self._wallets[currency_code] = Wallet(currency_code=currency_code, balance=0.0)
-
-    def get_total_value(self, base_currency: str = "USD") -> float:
-        """
-        Возвращает общую стоимость всех валют в указанной базовой валюте.
-
-        Args:
-            base_currency: Код базовой валюты для конвертации
-
-        Returns:
-            Общая стоимость портфеля в базовой валюте
-        """
-        # Фиксированные курсы для упрощения
-        exchange_rates = {
-            "USD": {"USD": 1.0, "EUR": 0.85, "BTC": 0.000025, "RUB": 0.011},
-            "EUR": {"USD": 1.18, "EUR": 1.0, "BTC": 0.000029, "RUB": 0.013},
-            "BTC": {"USD": 40000.0, "EUR": 34000.0, "BTC": 1.0, "RUB": 440000.0},
-            "RUB": {"USD": 90.0, "EUR": 77.0, "BTC": 0.0000023, "RUB": 1.0},
+        return {
+            "user_id": self._user_id,
+            "username": self._username,
+            "salt": self._salt,
+            "registration_date": self._registration_date.isoformat(),
         }
 
-        # Если базовая валюта не в курсах, используем USD как резерв
-        if base_currency not in exchange_rates:
-            base_currency = "USD"
+class Wallet:
+    """
+    Класс кошелька для одной конкретной валюты.
+    Управляет балансом и обеспечивает проверки на корректность операций.
+    """
+
+    def __init__(self, currency_code: str, balance: float = 0.0) -> None:
+        if not isinstance(currency_code, str) or not currency_code:
+            raise ValueError("Код валюты должен быть непустой строкой.")
+
+        if not isinstance(balance, (int, float)) or balance < 0:
+            raise ValueError("Начальный баланс должен быть числом >= 0.")
+
+        self.currency_code = currency_code.upper()
+        self._balance = float(balance)
+
+    # --- Геттер для баланса ---
+    @property
+    def balance(self) -> float:
+        return self._balance
+
+    # --- Сеттер для баланса ---
+    @balance.setter
+    def balance(self, value: float) -> None:
+        if not isinstance(value, (int, float)):
+            raise TypeError("Баланс должен быть числом.")
+        if value < 0:
+            raise ValueError("Баланс не может быть отрицательным.")
+        self._balance = float(value)
+
+    # --- Метод пополнения ---
+    def deposit(self, amount: float) -> None:
+        if not isinstance(amount, (int, float)):
+            raise TypeError("Сумма пополнения должна быть числом.")
+        if amount <= 0:
+            raise ValueError("Сумма пополнения должна быть положительной.")
+        self._balance += float(amount)
+
+    # --- Метод снятия ---
+    def withdraw(self, amount: float) -> None:
+        """Снятие средств с кошелька."""
+        if not isinstance(amount, (int, float)):
+            raise TypeError("Сумма снятия должна быть числом.")
+        if amount <= 0:
+            raise ValueError("Сумма снятия должна быть положительной.")
+        if amount > self._balance:
+            raise InsufficientFundsError(self._balance, amount, self.currency_code)
+        self._balance -= float(amount)
+
+    # --- Метод для вывода информации ---
+    def get_balance_info(self) -> dict:
+        """Возвращает информацию о валюте и текущем балансе."""
+        return {
+            "currency_code": self.currency_code,
+            "balance": round(self._balance, 2),
+        }
+
+class Portfolio:
+    """
+    Класс, управляющий всеми кошельками одного пользователя.
+    Позволяет добавлять валюты и рассчитывать общую стоимость портфеля.
+    """
+
+    def __init__(self, user_id: int) -> None:
+        if not isinstance(user_id, int) or user_id <= 0:
+            raise ValueError("user_id должен быть положительным целым числом.")
+
+        self._user_id = user_id
+        self._wallets: dict[str, Wallet] = {}
+
+    # --- Геттер для user_id (только чтение) ---
+    @property
+    def user(self) -> int:
+        """Возвращает ID пользователя."""
+        return self._user_id
+
+    # --- Геттер для wallets (возвращает копию словаря) ---
+    @property
+    def wallets(self) -> dict[str, Wallet]:
+        """Возвращает копию словаря кошельков."""
+        return self._wallets.copy()
+
+    # --- Метод добавления новой валюты ---
+    def add_currency(self, currency_code: str) -> None:
+        """Добавляет новый кошелёк, если его ещё нет."""
+        code = currency_code.upper()
+
+        if code in self._wallets:
+            raise ValueError(f"Кошелёк для валюты {code} уже существует.")
+
+        self._wallets[code] = Wallet(code, 0.0)
+
+    # --- Метод получения кошелька ---
+    def get_wallet(self, currency_code: str) -> Wallet:
+        """Возвращает объект Wallet по коду валюты."""
+        code = currency_code.upper()
+        if code not in self._wallets:
+            raise KeyError(f"Кошелёк для валюты {code} не найден.")
+        return self._wallets[code]
+
+    # --- Метод подсчёта общей стоимости портфеля ---
+    def get_total_value(self, base_currency: str = "USD") -> float:
+        """
+        Рассчитывает суммарную стоимость всех валют в указанной базовой валюте.
+        Использует фиксированные тестовые курсы (заглушку).
+        """
+        base_currency = base_currency.upper()
+
+        # Пример фиктивных курсов (в будущем заменим на парсер API)
+        exchange_rates = {
+            "USD": 1.0,
+            "EUR": 1.1,
+            "BTC": 65000.0,
+            "ETH": 3200.0,
+        }
 
         total_value = 0.0
 
-        for currency_code, wallet in self._wallets.items():
-            if currency_code in exchange_rates:
-                if base_currency in exchange_rates[currency_code]:
-                    rate = exchange_rates[currency_code][base_currency]
-                    total_value += wallet.balance * rate
-                else:
-                    usd_rate = exchange_rates[currency_code].get("USD", 1.0)
-                    base_rate = exchange_rates["USD"].get(base_currency, 1.0)
-                    total_value += wallet.balance * usd_rate * base_rate
-            else:
-                base_rate = exchange_rates["USD"].get(base_currency, 1.0)
-                total_value += wallet.balance * base_rate
+        for code, wallet in self._wallets.items():
+            rate = exchange_rates.get(code)
+            if rate is None:
+                raise ValueError(f"Нет курса для валюты {code}.")
+            # Переводим валюту в базовую (в доллары)
+            total_value += wallet.balance * rate
 
-        return total_value
-
-    def get_wallet(self, currency_code: str) -> Optional[Wallet]:
-        """
-        Возвращает объект Wallet по коду валюты.
-
-        Args:
-            currency_code: Код валюты
-
-        Returns:
-            Объект Wallet или None если кошелек не найден
-        """
-        return self._wallets.get(currency_code)
+        return round(total_value, 2)

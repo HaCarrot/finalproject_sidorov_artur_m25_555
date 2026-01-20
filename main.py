@@ -1,6 +1,15 @@
+#!/usr/bin/env python3
+"""
+ValutaTrade — основной вход в приложение.
+Запускает CLI-интерфейс для управления валютными операциями.
+"""
+
+from valutatrade_hub.cli.interface import run_app
+
+
 def main():
-    # ваш код
-    pass
+    """Точка входа в систему."""
+    run_app()
 
 
 if __name__ == "__main__":
