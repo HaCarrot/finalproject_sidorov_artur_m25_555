@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "finalproject-sidorov-artur-m25-555"
+version = "1.0.0"
+description = "CLI приложение для управления портфелем валют"
+authors = ["Arthur Sidorov"]
+readme = "README.md"
+packages = [{ include = "valutatrade_hub" }]
+
+[tool.poetry.dependencies]
+python = ">=3.12"
+prettytable = "^3.17.0"
+
+[tool.poetry.scripts]
+project = "main:main"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = ["venv", ".venv", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "ruff (>=0.14.13,<0.15.0)"
+]
